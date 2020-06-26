@@ -362,24 +362,43 @@ perm_protein_name = convert_name_list(
 
 
 # -------------------------------------------------
+def get_involved_pathways(node, msi):
+    neighbors = list(msi.graph.neighbors(node))
+    pathways = [node for node in neighbors if msi.graph.nodes[node]
+                ['type'] == 'functional_pathway']
+    return pathways
+
+
+# output gcn protein embeddings
 gcn_embs = np.loadtxt("whole_graph_gcn_pathway.embs.txt")
 gcn_embs = normalize(gcn_embs, axis=1)
 ppi_embs = np.loadtxt(
     "whole_graph_node2vec_pathway_walk_num_64_len_16.embs.txt", skiprows=1, dtype=object)
 nodes = list(ppi_embs[:, 0])
-del ppi_embs
 node_names = [msi.node2name[node] for node in nodes]
 
 covid_emb = gcn_embs[nodes.index('NodeCovid')]
-protein_mask = [True if (msi.graph.node[node]['type'] ==
+protein_mask = [True if (msi.graph.nodes[node]['type'] ==
                          'protein' and msi.node2name[node] is not np.nan) else False for node in nodes]
 protein_names = list(np.array(node_names)[protein_mask])
 protein_embs = gcn_embs[protein_mask]
-protein_proximities = list(np.matmul(protein_embs, covid_emb))
+protein_proximities = np.matmul(protein_embs, covid_emb)
+gcn_ranks = np.argsort(np.argsort(-protein_proximities))
 
+# output node2vec protein embeddings
+node2vec_embs = ppi_embs[:, 1:].astype(float)
+del ppi_embs
+
+covid_emb_node2vec = node2vec_embs[nodes.index('NodeCovid')]
+protein_embs_node2vec = node2vec_embs[protein_mask]
+protein_proximities_node2vec = np.matmul(
+    protein_embs_node2vec, covid_emb_node2vec)
+node2vec_ranks = np.argsort(np.argsort(-protein_proximities_node2vec))
 
 shortest_paths = []
 path_lengths = []
+involved_pathways = []
+involved_pathway_names = []
 for node in list(np.array(nodes)[protein_mask]):
     # compute paths
     path = nx.shortest_path(
@@ -389,12 +408,24 @@ for node in list(np.array(nodes)[protein_mask]):
     shortest_paths.append(', '.join(path_node_names))
     path_lengths.append(len(path)-1)
 
+    pathways = get_involved_pathways(node, msi)
+    pathway_names = [node if msi.node2name[node]
+                     is np.nan else msi.node2name[node] for node in pathways]
+    involved_pathways.append(', '.join(pathways))
+    involved_pathway_names.append(', '.join(pathway_names))
+
 
 protein_df = pd.DataFrame({
     'protein name': protein_names,
-    'proximity to Covid-19': protein_proximities,
+    'average rank': (gcn_ranks+node2vec_ranks)/2,
+    'rank(gcn)': gcn_ranks,
+    'rank(node2vec)': node2vec_ranks,
+    'proximity to Covid-19(gcn)': protein_proximities,
+    'proximity to Covid-19(node2vec)': protein_proximities_node2vec,
     'shortest path to Covid-19': shortest_paths,
-    'path length': path_lengths
+    'path length': path_lengths,
+    'involved pathway id': involved_pathways,
+    'involved pathway name': involved_pathway_names
 })
-protein_df.to_csv('all_protein_proximities_pathway_gcn.tsv',
-                  sep='\t', na_rep='NA', index=False)
+protein_df.sort_values(['average rank']).to_csv('all_protein_proximities_pathway_merged.tsv',
+                                                sep='\t', na_rep='NA', index=False)

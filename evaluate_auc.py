@@ -21,6 +21,7 @@ import collections
 import argparse
 from parse_config import ConfigParser
 from utils import query_uniprot2data, make_SARSCOV2_PPI
+from modules.ranker import DiffusionRanker
 
 
 def graph_embedding(config, msi, gcn=False):
@@ -114,31 +115,70 @@ def main(config):
     save_graph_file = config['eval']['graph']
     diffusion_embs_dir = config['diffusion']['eval_diffusion_embs_dir']
     drug_to_indication = config['networks']['drug_to_indication']
+    topk = config['topk']
+    gordon_viral_protein = config['networks']['gordon_viral_protein']
+    covid_to_protein = config['covid']['save_dir']
+    protein_to_protein = config['networks']['protein_to_protein']
+    task = config['eval']['task']  # general or covid-19
+    metric = config['eval']['metric']  # auc or gene etc.
 
-    # Construct the multiscale interactome
-    msi = MSI()
-    msi.load()
+    # if need to evaluate on the covid-19, add it here
+    if task == 'general':
+        # Construct the multiscale interactome
+        msi = MSI()
+        msi.load()
+    elif task == 'covid-19':
+        if not os.path.exists(covid_to_protein):
+            # load proteins
+            proteins = pd.read_csv(protein_to_protein, sep='\t')
 
-    # store the whole graph
-    if not os.path.exists(save_graph_file):
-        nx.write_weighted_edgelist(msi.graph, save_graph_file)
-    else:
-        import warnings
-        warnings.warn(
-            f"graph struc file {save_graph_file} already exists. change this line if want to overwrite.")
+            covid_protein_list = make_SARSCOV2_PPI(gordon_viral_protein)  # 332
+            # has 306
+            covid_protein_list = [
+                protein for protein in covid_protein_list if protein in proteins['node_1_name'].values]
 
-    # nx.write_edgelist(msi.graph, 'whole_graph.edgelist')
-    if method == 'diffusion':
-        dp_saved = diffusion_method(diffusion_embs_dir, msi)
-    elif method == 'node2vec':
-        drugs_name_ranked = graph_embedding(config, msi, gcn=False)
-    elif method == 'gcn' and config['gcn']['embs'] == "node2vec":
-        drugs_name_ranked = graph_embedding(config, msi, gcn=True)
+            proteinname2node = dict(
+                set(list(zip(proteins['node_1_name'], proteins['node_1']))))
+            # make covid data fram
+            node_1 = ['NodeCovid'] * len(covid_protein_list)
+            node_1_type = ['indication'] * len(covid_protein_list)
+            node_1_name = ['covid-19'] * len(covid_protein_list)
+            node_2 = [proteinname2node[name] for name in covid_protein_list]
+            node_2_type = ['protein'] * len(covid_protein_list)
+            node_2_name = covid_protein_list
+            covid_protein_df = pd.DataFrame({
+                'node_1': node_1,
+                'node_2': node_2,
+                'node_1_type': node_1_type,
+                'node_2_type': node_2_type,
+                'node_1_name': node_1_name,
+                'node_2_name': node_2_name
+            })
+            covid_protein_df.to_csv(covid_to_protein, sep='\t', index=False)
+        else:
+            covid_protein_df = pd.read_csv(covid_to_protein, sep='\t')
+
+        # Construct the multiscale interactome
+        msi = MSI(indication2protein_file_path=covid_to_protein,
+                  indication2protein_directed=False)
+        msi.load()
     else:
         raise NotImplementedError
 
+    print('assigning weights')
+    weights = {
+        'down_functional_pathway': 4.4863053901688685,
+        'indication': 3.541889556309463,
+        'functional_pathway': 6.583155399238509,
+        'up_functional_pathway': 2.09685000906964,
+        'protein': 4.396695660380823,
+        'drug': 3.2071696595616364
+    }
+    msi.weight_graph(weights)
+
     indication_graph = DrugToIndication(False, drug_to_indication)
-    # list(indication_graph.graph['C0040038'])
+    print("indication_graph.graph['C0040038']",
+          list(indication_graph.graph['C0040038']))
 
     drugs_index_in_msi = []
     drugs = []
@@ -153,7 +193,29 @@ def main(config):
             indications_index_in_msi.append(i)
     # list of indications
 
-    num_drugs = len(drugs_index_in_msi)
+    # store the whole graph
+    if not os.path.exists(save_graph_file):
+        nx.write_weighted_edgelist(msi.graph, save_graph_file)
+    else:
+        import warnings
+        warnings.warn(
+            f"graph struc file {save_graph_file} already exists. change this line if want to overwrite.")
+
+    # nx.write_edgelist(msi.graph, 'whole_graph.edgelist')
+    if method == 'diffusion':
+        dp_saved = diffusion_method(diffusion_embs_dir, msi)
+
+        # the interface providing the similarity
+        def get_proximities(indication):
+            return dp_saved.drug_or_indication2diffusion_profile[indication]
+    elif method == 'node2vec':
+        drugs_name_ranked = graph_embedding(config, msi, gcn=False)
+    elif method == 'gcn' and config['gcn']['embs'] == "node2vec":
+        drugs_name_ranked = graph_embedding(config, msi, gcn=True)
+    else:
+        raise NotImplementedError
+
+    num_drugs = len(drugs)
     all_aucs = []
     for indication in indications:
         # build ref
@@ -161,7 +223,8 @@ def main(config):
         for pos_drug in list(indication_graph.graph[indication]):
             ref[drugs.index(pos_drug)] = 1
         # predict vector
-        tmp = dp_saved.drug_or_indication2diffusion_profile[indication]
+        # tmp is a collection of proximity values
+        tmp = get_proximities(indication)
         predict = tmp[drugs_index_in_msi]
         auc = roc_auc_score(ref, predict)
         # print(auc)

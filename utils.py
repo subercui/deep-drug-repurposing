@@ -5,6 +5,29 @@ import pickle
 import csv
 import numpy as np
 import pandas as pd
+from typing import List, Iterable, Collection
+
+
+def provide_drugranks(drug_proximities: np.ndarray, drug_nodes: List, node2name: Collection):
+    """provides ranked drug candidates
+
+    Args:
+        drug_proximities (np.ndarray): proximity values of a set of drugs.
+        drug_nodes (List): the node id of the set of drugs.
+        node2name (Collection): dictionary mapping from the drug nodes to drug names.
+
+    Returns:
+        Tuple: (ranked name (optional), ranked drug nodes, ranked proximities)
+    """
+    proximities_ranked_id = np.argsort(np.array(drug_proximities))[::-1]
+    proximities_ranked = drug_proximities[proximities_ranked_id]
+    drugs_ranked = [drug_nodes[i] for i in proximities_ranked_id]
+    if node2name:
+        drugs_name_ranked = [drug if node2name[drug]
+                             is np.nan else node2name[drug] for drug in drugs_ranked]
+
+        return drugs_name_ranked, drugs_ranked, proximities_ranked
+    return drugs_ranked, proximities_ranked
 
 
 def query_uniprot2data(query='P40925 P40926',
