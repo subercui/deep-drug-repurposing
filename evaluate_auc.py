@@ -176,23 +176,6 @@ def main(config):
     }
     msi.weight_graph(weights)
 
-    indication_graph = DrugToIndication(False, drug_to_indication)
-    print("indication_graph.graph['C0040038']",
-          list(indication_graph.graph['C0040038']))
-
-    drugs_index_in_msi = []
-    drugs = []
-    indications_index_in_msi = []
-    indications = []
-    for i, node in enumerate(msi.nodelist):
-        if msi.graph.nodes[node]['type'] == 'drug':
-            drugs.append(node)
-            drugs_index_in_msi.append(i)
-        if msi.graph.nodes[node]['type'] == 'indication':
-            indications.append(node)
-            indications_index_in_msi.append(i)
-    # list of indications
-
     # store the whole graph
     if not os.path.exists(save_graph_file):
         nx.write_weighted_edgelist(msi.graph, save_graph_file)
@@ -205,7 +188,22 @@ def main(config):
     if method == 'diffusion':
         dp_saved = diffusion_method(diffusion_embs_dir, msi)
 
+        drugs_index_in_msi = []
+        drugs = []
+        indications_index_in_msi = []
+        indications = []
+        for i, node in enumerate(msi.nodelist):
+            if msi.graph.nodes[node]['type'] == 'drug':
+                drugs.append(node)
+                drugs_index_in_msi.append(i)
+            if msi.graph.nodes[node]['type'] == 'indication':
+                indications.append(node)
+                indications_index_in_msi.append(i)
+        if metric == 'clinical-trial':
+            drug_proximities = dp_saved.drug_or_indication2diffusion_profile[
+                "NodeCovid"][drugs_index_in_msi]
         # the interface providing the similarity
+
         def get_proximities(indication):
             return dp_saved.drug_or_indication2diffusion_profile[indication]
     elif method == 'node2vec':
@@ -215,22 +213,50 @@ def main(config):
     else:
         raise NotImplementedError
 
-    num_drugs = len(drugs)
-    all_aucs = []
-    for indication in indications:
-        # build ref
-        ref = np.zeros(num_drugs, dtype=int)
-        for pos_drug in list(indication_graph.graph[indication]):
-            ref[drugs.index(pos_drug)] = 1
-        # predict vector
-        # tmp is a collection of proximity values
-        tmp = get_proximities(indication)
-        predict = tmp[drugs_index_in_msi]
-        auc = roc_auc_score(ref, predict)
-        # print(auc)
-        all_aucs.append(auc)
-    all_aucs = np.array(all_aucs)
-    print(f"median auc: {np.median(all_aucs)}, mean auc: {all_aucs.mean()}")
+    if metric == 'auc':
+        indication_graph = DrugToIndication(False, drug_to_indication)
+        print("indication_graph.graph['C0040038']",
+              list(indication_graph.graph['C0040038']))
+        num_drugs = len(drugs)
+        all_aucs = []
+        for indication in indications:
+            # build ref
+            ref = np.zeros(num_drugs, dtype=int)
+            for pos_drug in list(indication_graph.graph[indication]):
+                ref[drugs.index(pos_drug)] = 1
+            # predict vector
+            # tmp is a collection of proximity values
+            tmp = get_proximities(indication)
+            predict = tmp[drugs_index_in_msi]
+            auc = roc_auc_score(ref, predict)
+            # print(auc)
+            all_aucs.append(auc)
+        all_aucs = np.array(all_aucs)
+        print(
+            f"median auc: {np.median(all_aucs)}, mean auc: {all_aucs.mean()}")
+    elif metric == 'clinical-trial':
+        proximities_ranked_id = np.argsort(drug_proximities)[::-1]
+        drugs_ranked = [drugs[i] for i in proximities_ranked_id]
+        drugs_name_ranked = [drug if msi.node2name[drug]
+                             is np.nan else msi.node2name[drug] for drug in drugs_ranked]
+
+        # compare to clinical trial
+        drugs_in_trial = pd.read_csv('data/Covid-19 Clinical Trials.csv')
+        union_drugs_in_trial = []
+        for id in drugs_in_trial['DrugBank ID']:
+            if id in drugs_ranked[:100]:
+                union_drugs_in_trial.append(id)
+        print(
+            f'total {len(union_drugs_in_trial)} experimental Covid-19 drugs found in top 100 candidates')
+        dexamethasone_ranking = drugs_name_ranked.index('dexamethasone')
+        print(
+            f'Dexamethasone ranking: {dexamethasone_ranking} / {len(drugs_name_ranked)}')
+        interferon_ranking = drugs_name_ranked.index('Interferon beta-1b')
+        print(
+            f'Interferon beta-1b ranking: {interferon_ranking} / {len(drugs_name_ranked)}')
+
+    else:
+        raise NotImplementedError
     return msi
 
 
