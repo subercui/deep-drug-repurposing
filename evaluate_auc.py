@@ -54,24 +54,24 @@ def graph_embedding(config, msi, gcn=False):
         node_embs = node_vecs[:, 1:].astype(np.float)
 
     # FIXME: modify after this line
-    covid_emb = np.array(node_embs[node_names.index('NodeCovid')])
+    # covid_emb = np.array(node_embs[node_names.index('NodeCovid')])
 
-    drug_names = []
-    drug_embs = []
-    for i, node in enumerate(node_names):
-        if msi.graph.nodes[node]['type'] == 'drug':
-            drug_names.append(node)
-            drug_embs.append(node_embs[i])
-    drug_embs = np.array(drug_embs)
-    proximities = np.matmul(drug_embs, covid_emb)
+    # drug_names = []
+    # drug_embs = []
+    # for i, node in enumerate(node_names):
+    #     if msi.graph.nodes[node]['type'] == 'drug':
+    #         drug_names.append(node)
+    #         drug_embs.append(node_embs[i])
+    # drug_embs = np.array(drug_embs)
+    # proximities = np.matmul(drug_embs, covid_emb)
     # drug_embs_normed = normalize(drug_embs, axis=1)
     # proximities = np.matmul(drug_embs_normed, covid_emb)
 
-    proximities_ranked_id = np.argsort(np.array(proximities))[::-1]
-    drugs_ranked = [drug_names[i] for i in proximities_ranked_id]
-    drugs_name_ranked = [drug if msi.node2name[drug]
-                         is np.nan else msi.node2name[drug] for drug in drugs_ranked]
-    return drugs_name_ranked
+    # proximities_ranked_id = np.argsort(np.array(proximities))[::-1]
+    # drugs_ranked = [drug_names[i] for i in proximities_ranked_id]
+    # drugs_name_ranked = [drug if msi.node2name[drug]
+    #                      is np.nan else msi.node2name[drug] for drug in drugs_ranked]
+    return node_names, node_embs
 
 
 def diffusion_method(diffusion_embs_dir, msi):
@@ -205,11 +205,35 @@ def main(config):
         # the interface providing the similarity
 
         def get_proximities(indication):
-            return dp_saved.drug_or_indication2diffusion_profile[indication]
+            tmp = dp_saved.drug_or_indication2diffusion_profile[indication]
+            return tmp[drugs_index_in_msi]
     elif method == 'node2vec':
-        drugs_name_ranked = graph_embedding(config, msi, gcn=False)
+        node_names, node_embs = graph_embedding(
+            config, msi, gcn=False)
+
+        drugs = []
+        drug_embs = []
+        for i, node in enumerate(node_names):
+            if msi.graph.nodes[node]['type'] == 'drug':
+                drugs.append(node)
+                drug_embs.append(node_embs[i])
+        drug_embs = np.array(drug_embs)
+
+        if metric == 'clinical-trial':
+            covid_emb = np.array(node_embs[node_names.index('NodeCovid')])
+            drug_proximities = np.matmul(drug_embs, covid_emb)
+
+        if metric == "auc":
+            def get_proximities(indication):
+                ind = node_names.index(indication)
+                indication_emb = np.array(node_embs[ind])
+                return np.matmul(drug_embs, indication_emb)
+            indications = []
+            for i, node in enumerate(msi.nodelist):
+                if msi.graph.nodes[node]['type'] == 'indication':
+                    indications.append(node)
     elif method == 'gcn' and config['gcn']['embs'] == "node2vec":
-        drugs_name_ranked = graph_embedding(config, msi, gcn=True)
+        drugs, drug_proximities = graph_embedding(config, msi, gcn=True)
     else:
         raise NotImplementedError
 
@@ -226,8 +250,7 @@ def main(config):
                 ref[drugs.index(pos_drug)] = 1
             # predict vector
             # tmp is a collection of proximity values
-            tmp = get_proximities(indication)
-            predict = tmp[drugs_index_in_msi]
+            predict = get_proximities(indication)
             auc = roc_auc_score(ref, predict)
             # print(auc)
             all_aucs.append(auc)
