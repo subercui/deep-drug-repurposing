@@ -207,9 +207,9 @@ def main(config):
         def get_proximities(indication):
             tmp = dp_saved.drug_or_indication2diffusion_profile[indication]
             return tmp[drugs_index_in_msi]
-    elif method == 'node2vec':
+    elif (method == 'node2vec') or (method == 'gcn' and config['gcn']['embs'] == "node2vec"):
         node_names, node_embs = graph_embedding(
-            config, msi, gcn=False)
+            config, msi, gcn=False if method == 'node2vec' else True)
 
         drugs = []
         drug_embs = []
@@ -232,8 +232,6 @@ def main(config):
             for i, node in enumerate(msi.nodelist):
                 if msi.graph.nodes[node]['type'] == 'indication':
                     indications.append(node)
-    elif method == 'gcn' and config['gcn']['embs'] == "node2vec":
-        drugs, drug_proximities = graph_embedding(config, msi, gcn=True)
     else:
         raise NotImplementedError
 

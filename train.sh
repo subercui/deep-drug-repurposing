@@ -1,6 +1,6 @@
 #! /usr/bin/env bash
 python train.py \
-    --emb-file whole_graph_node2vec_pathway_walk_num_64_len_16.embs.txt \
+    --emb-file eval_general_node2vec_walk_num_64_len_16.embs.txt \
     --num-layers 2 \
     --hidden-units 128 \
     --k 5 \
