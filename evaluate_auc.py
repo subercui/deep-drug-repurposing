@@ -4,6 +4,7 @@
 # provides the auc of the method
 from sklearn.preprocessing import normalize
 from multiscale_interactome.openne.node2vec import Node2vec
+from multiscale_interactome.openne.grarep import GraRep
 from multiscale_interactome.openne.graph import Graph
 from multiscale_interactome.msi.node_to_node import DrugToIndication
 import os
@@ -22,6 +23,34 @@ import argparse
 from parse_config import ConfigParser
 from utils import query_uniprot2data, make_SARSCOV2_PPI
 from modules.ranker import DiffusionRanker
+
+
+def grarep_embedding(config, msi, gcn=False):
+    # if node2vec
+    # debug_g = nx.subgraph(msi.graph, list(g.nodes.keys())[:40])
+    emb_file_prefix = config['GraRep']['eval_emb_file_prefix']
+    Kstep = config['GraRep']['Kstep']
+    emb_file = f"{emb_file_prefix}_Kstep_{Kstep}.embs.txt"
+    gcn_emb_file = config['gcn']['emb_file']
+    if not os.path.exists(emb_file):
+        print("Calculating node2vec embeddings...")
+        g = Graph()
+        g.read_g(msi.graph)
+        model = GraRep(
+            graph=g, Kstep=Kstep, dim=120
+        )
+        print("Saving embeddings...")
+        model.save_embeddings(emb_file)
+
+    # load embs
+    node_vecs = np.loadtxt(emb_file, skiprows=1, dtype=object)
+    node_names = list(node_vecs[:, 0])
+    if gcn:
+        node_embs = np.loadtxt(gcn_emb_file)
+        node_embs = normalize(node_embs, axis=1)
+    else:
+        node_embs = node_vecs[:, 1:].astype(np.float)
+    return node_names, node_embs
 
 
 def graph_embedding(config, msi, gcn=False):
@@ -210,6 +239,31 @@ def main(config):
     elif (method == 'node2vec') or (method == 'gcn' and config['gcn']['embs'] == "node2vec"):
         node_names, node_embs = graph_embedding(
             config, msi, gcn=False if method == 'node2vec' else True)
+
+        drugs = []
+        drug_embs = []
+        for i, node in enumerate(node_names):
+            if msi.graph.nodes[node]['type'] == 'drug':
+                drugs.append(node)
+                drug_embs.append(node_embs[i])
+        drug_embs = np.array(drug_embs)
+
+        if metric == 'clinical-trial':
+            covid_emb = np.array(node_embs[node_names.index('NodeCovid')])
+            drug_proximities = np.matmul(drug_embs, covid_emb)
+
+        if metric == "auc":
+            def get_proximities(indication):
+                ind = node_names.index(indication)
+                indication_emb = np.array(node_embs[ind])
+                return np.matmul(drug_embs, indication_emb)
+            indications = []
+            for i, node in enumerate(msi.nodelist):
+                if msi.graph.nodes[node]['type'] == 'indication':
+                    indications.append(node)
+    elif method == 'GraRep':
+        node_names, node_embs = grarep_embedding(
+            config, msi, gcn=False)
 
         drugs = []
         drug_embs = []
