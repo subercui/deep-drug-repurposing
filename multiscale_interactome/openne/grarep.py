@@ -25,8 +25,7 @@ class GraRep(object):
         return np.matrix(adj/np.sum(adj, axis=1))
 
     def GetProbTranMat(self, Ak):
-        probTranMat = np.log(Ak/np.tile(
-            np.sum(Ak, axis=0), (self.node_size, 1))) \
+        probTranMat = np.log(normalize(Ak, axis=0, norm='l1') + 1e-9) \
             - np.log(1.0/self.node_size)
         probTranMat[probTranMat < 0] = 0
         probTranMat[probTranMat == np.nan] = 0

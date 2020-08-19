@@ -33,7 +33,7 @@ def grarep_embedding(config, msi, gcn=False):
     emb_file = f"{emb_file_prefix}_Kstep_{Kstep}.embs.txt"
     gcn_emb_file = config['gcn']['emb_file']
     if not os.path.exists(emb_file):
-        print("Calculating node2vec embeddings...")
+        print("Calculating GraRep embeddings...")
         g = Graph()
         g.read_g(msi.graph)
         model = GraRep(
