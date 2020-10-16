@@ -25,4 +25,10 @@ msi.graph.nodes
 msi.graph['DB04865']
 ```
 
+## Train the hierarchical GCN (protein and pathway level)
+
+```python
+python tran_dual_gcn.py
+```
+
 Currently we are using [networkx](https://networkx.github.io/documentation/stable/). Click and find more interfaces from the documents.
