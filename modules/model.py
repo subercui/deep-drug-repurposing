@@ -51,6 +51,10 @@ class GCN(nn.Module):
         return pred
 
 
+class HierarchicalGCN(nn.Module):
+    def __init__(self):
+        self.gcn_modules = []  # list of GCN on different hierarchies
+
 # implement mini-batch using node-flow in DGL
 
 
